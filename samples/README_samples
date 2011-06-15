@@ -1,0 +1,146 @@
+This is a tutorial on incorporating the adaptive feature controller into
+the mpeg2enc application from the MediaBench II video benchmark suite.
+
+A. Motivation:
+  - The MPEG2 Encoder's per-frame execution time varies significantly over
+    the sequence of frames being encoded, as the characteristics of the
+    underlying video change (fast action video vs slow fixed background, etc.). 
+
+  - The MPEG2 Encoder's per-frame execution-time greatly depends on
+    fixed characteristics of the input data (video frame-size, in particular),
+    and on the speed of the platform used for encoding (e.g., embedded vs desktop)
+
+  - In many settings, such as encoding and broadcasting a live video stream,
+    it is highly desirable to maintain a smooth frame-rate with very little
+    'jitter' (say, maintain 25 frames-per-second, with a < 20% jitter).
+
+B. Difficulty in controlling application characteristics:
+  - It is possible to tune parameters within the application in order to
+    dramatically impact frame-encoding-time, with a corresponding impact on
+    achieved compression and fidelity. In particular, the Motion Estimation
+    algorithm within the MPEG2 Encoder is known to dominate frame-encoding-time.
+    The algorithm's execution-time (and achieved compression + fidelity) can be
+    scaled dramatically by varying a 'search-window-size' parameter within the
+    program.
+
+  - However, due to sensitivity of frame-encoding-time on data characteristics
+    and on the platform, it is very hard for even expert programmers to
+    dynamically tune the 'search-window-size' parameter for Motion Estimation.
+
+C. Use of our Feature Controller:
+  - Our controller is trivial to incorporate in most applications, yet
+    delivers dramatic improvements of frame-rate and QoS (fidelity, etc) over
+    arbitrary data-sets and a variety of platforms. Any frame-oriented
+    application that satisfies very minimal requirements
+    ("domain assumptions", refer [1]), can expect significant gains from
+    incorporating our controller. Our paper on the Feature Controller [1]
+    details the improvements achieved.
+
+
+D. Incorporating Feature Controller into mpeg2enc
+STEPS:
+1. Under featurecontroller/samples, download and unpack the benchmark source:
+       wget http://euler.slu.edu/~fritts/mediabench/mb2/mb2_video.tgz
+       tar xvzf mb2_video.tgz
+
+  This should create the featurecontroller/samples/mediabench2_video directory.
+
+2. Under mediabench2_video/mpeg2enc, unpack the source code for
+    the mpeg2enc and the mpeg2dec applications.
+
+       cd mediabench2_video/mpeg2enc
+       tar xvzf mpeg2vidcodec_v12.tar.gz
+
+   This should create the mpeg2/src/mpeg2enc and mpeg2/src/mpeg2dec directories
+    for the two applications. We will only look at mpeg2enc here.
+
+3. Replace source files, and build
+    a) cd mediabench2_video/mpeg2enc/mpeg2/src/mpeg2enc
+    b) mv Makefile Makefile.original
+    c) mv motion.c motion.c.original
+    d) mv mpeg2enc.c mpeg2enc.c.original
+    e) mv putseq.c putseq.c.original
+    f) cp ../../../../../mpeg2enc_changes/* .
+    g) make
+        (the FeatureController library should have previously been built
+             by typing 'make' under featurecontroller/src/)
+   NOTE: It would  be instructive to compare the modified versions of the above
+    replacement source files with the original ones saved using .original extensions.
+
+
+4. Getting large test-inputs:
+  a) Download 'dolbycity.zip' from http://www.dvdloc8.com/dolbydtsclip.php?clipid=2
+  b) Extract dolbycity.vob from zip-file
+  c) Use transcode.pl utility (under featurecontroller/samples) to produce video in MPEG2 format.
+     (you'll need ffmpeg installed, edit transcode.pl to correct path to ffmpeg)
+
+       transcode.pl dolbycity.vob
+
+  d) Copy the produced dolbycity640x480.m2v file to featurecontroller/samples/run_mpeg2enc
+  e) Under featurecontroller/samples/run_mpeg2enc:
+       ./create_inputs.sh
+
+      This will build and execute the decoder application, mpeg2dec, under
+        mediabench2_video/mpeg2enc/mpeg2/src/mpeg2dec, in order to produce
+        a sequence of raw images from dolbycity640x480.m2v. These raw images
+        are the input data for the mpeg2enc application.
+
+
+5. Executing application, performance measurements.
+    Under featurecontroller/samples/run_mpeg2enc:
+    a) ./run_exp 01 window_frac sliding_window coeff
+
+      This script invokes the mpeg2enc application for different choices of desired
+      frame-times. The application is dictated to maintain frame-time within 20% of
+      the frame-time specified by the script. For any given choice of desired frame-time,
+      the script invokes the application multiple times, once using the featurecontroller
+      to dynamically tune the 'search-window-size' parameter, and then N times for the N
+      possible fixed setting of the 'search-window-size' parameter (where parameter is kept
+      at a fixed value for the entire run of the application).
+
+    b) Comparing results:
+      - The previous step should have generated a number of log files with the following
+         naming structure:
+           log_srt_01_mean0.04_wf0.2_sl7_rescale, log_fixed0_01_mean0.04_wf0.2_sl7,
+            log_fixed1_01_mean0.04_wf0.2_sl7, etc.
+
+      - Here the 'srt' files log the behavior of the application with the featurecontroller,
+         when the mean was a specific value (say, 0.04 seconds).
+         The 'fixed' files log the application behavior for a corresponding fixed setting,
+         with the featurecontroller's dynamic tuning disabled.
+
+      - Open log_srt_01_mean0.04_wf0.2_sl7 in a text editor. Near *bottom* of file, look for
+         'unbinned_satisfaction_ratio'. This value gives the fraction of the
+        frames that fell within the specified objective (0.04 seconds +- 20%, in this case).
+
+      - Similarly, open log_fixed0_01_mean0.04_wf0.2_sl7, and examine the
+         'unbinned_satisfaction_ratio' near bottom of file.
+
+      - Repeat for log files for fixed1, fixed2 for the same mean=0.04. You should find
+         the controller typically outperforming the fixed cases by large margins.
+          (See [1] for more concise result graphs).
+
+      - Examine 'srt' log files for other values of mean, and note the 
+          'unbinned_satisfaction_ratio' achieved for different means.
+         A 0 value indicates an impossible-to-achieve mean-objective given the currently
+           available algorithmic scaling options.
+
+    c) Repeat experiments for different input data-sets. The following files would have
+        also been produced by the trancode.pl script in Step 4) above.
+            - dolbycity160x120.m2v
+            - dolbycity320x240.m2v
+       - Under run_mpeg2enc/ execute the 'clear.sh' script to delete extraneous files
+          generated by Step 5).
+       - Now copy in one of the above input videos to run_mpeg2enc/.
+       - Edit run_mpeg2enc/create_inputs.sh to use the correct input video file
+       - Edit run_mpeg2enc/config.par, modifying the 'display_horizontal_size' and
+          'display_vertical_size' fields to reflect the resolution of the input video
+          (say, 160 & 120, instead of 640 & 480).
+       - Re-run the create_inputs.sh and run_exp scripts as described above to produce
+           results for the new input video.
+       
+
+[1] Kumar, T., Cledat, R. E., and Pande, S., “Dynamic tuning of feature set in
+    highly variant interactive applications,” in Proceedings of the tenth ACM international
+    conference on Embedded software, EMSOFT ’10, (New York, NY, USA), pp. 289–298,
+    ACM, 2010.

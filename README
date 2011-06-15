@@ -1,0 +1,188 @@
+// Copyright 2011, Tushar Kumar, Georgia Institute of Technology, under the 3-clause BSD license
+//
+// Author: Tushar Kumar, tushardeveloper@gmail.com
+
+Feature Controller
+------------------
+
+1. INTRODUCTION
+Feature Controller is a runtime library to make possible the dynamic tuning of the
+frame-rate and expressed features of an immersive application. Lots of applications
+in gaming, multimedia and computer vision are too complex to allow the manual tuning of
+their features on every possible input data-set or hardware platform.
+
+  In contrast, often the QoS requirements for these applications are remarkably
+simple:
+  - maintain a high and smooth frame-rate (say, 25 frames-per-second with a
++-20% tolerable error)
+  - and, maximize the features expressed by the application while not violating
+   the above specified desirable frame-rate window.
+
+  Further, these applications are typically constructed from scalable algorithms
+whose per-frame runtime complexity and the corresponding computational
+quality-of-result can be scaled by tuning 'algorithmic parameters' within
+the application. For example, in a video game, controlling the frequency of
+Artificial Intelligence (AI) computations affects both the frame-time as well
+as the level of intelligence exhibited by simulated game characters.
+
+
+  However, for reasons detailed in [1], even expert programmers find it difficult
+to either offline determine good settings for these algorithmic parameters in order
+to maintain desired frame-rate, or to dynamically tune these parameters at runtime.
+Hence the need for an automated controller that "just works" for a very broad spectrum
+of applications, a need met by this Feature Controller.
+
+  See [1] for the theoretical underpinnings of Feature Controller, and a detailed
+examination of use-scenarios with experimental results.
+Concisely, the Feature Controller is an Adaptive Gain-Scheduling Feedback Controller,
+relying on semi-physical System-Identification, in order to work well for a
+*domain* of applications (rather than just a specific application).
+
+So far, we have used Feature Controller to "out-of-the-box" deliver remarkable
+QoS improvements for the following applications (see [1] for some results):
+ - The Torque Game Engine
+     www.garagegames.com
+
+ - MPEG2 Encoder from the MediaBench II video benchmark suite
+     http://euler.slu.edu/~fritts/mediabench/mb2/index.html
+       
+ - FERNS: computer vision object-tracking application
+     http://cvlab.epfl.ch/alumni/oezuysal/ferns.html
+
+ - RTFTR: real-time face-tracking and recognition
+     http://rtftr.sourceforge.net/
+
+
+2. CONTENTS
+     featurecontroller/
+           src/       - C++ source code for featurecontroller.
+                          opp.h, c_opp.h and opp_debug_control.h are the only external APIs.
+
+           samples/   - Tutorial demonstrating applying featurecontroller to
+                          a real-world application.
+
+
+3. APIs
+The Feature Controller is incorporated in an application in a minimally invasive
+manner. The file src/opp.h provides the API for incorporating featurecontroller
+into a C++ application. For a C application, the file src/c_opp.h extracts out
+some API calls as C functions to allow incorporation into a C application (though
+a new C++ file still must be linked with the application to handle some object
+instantiations via the C++ API).
+
+Type 'make' under src/ to build the featurecontroller. This produces 'libsrt.a' that
+an application can link against to use featurecontroller.
+
+NOTE: The current version of the API is much more complex than is necessary for
+supporting the objective of scaling algorithmic parameters to maintain frame-rate
+while maximizing expressed feature-set. The generalized API allowed us to explore
+multiple strategies for QoS control, including Reinforcement Learning and various
+multi-variate strategies for capturing a complex set of QoS requirements.
+
+HOWEVER, in this release, only the adaptive feedback-control strategy is correct
+and usable. The API must be exercised in ONLY A SPECIFIC MANNER, so that other
+parts of the functionality are not invoked.
+
+IN FUTURE RELEASES, the extraneous functionality will be stripped out, and the
+API will be considerably simplified.
+
+USE ONLY AS FOLLOWS:
+  a) src/opp_test.cpp is a sample synthetic application, which illustrates the limited
+     parts of the API that are to be used.
+
+   Examine the opp_test.cpp source code, and note the following:
+   - main() repeatedly invokes function ww(). The goal is to keep
+      the execution-time of each invocation of ww() within a desired
+      'frame-time objective'. ww() needs to invoke any one of
+       f1(), f2(), f3() or f4() depending on which one will best produce
+       the desired frame-time. f1 to f4 are sorted in order of *decreasing*
+       execution-time complexity (i.e., f1 does a more sophisticated computation
+        than f2, and so on).
+
+   - In general, the Opp:: namespace identifies the featurecontroller API calls.
+
+   - The following statement in main() indicates that only the adaptive
+      feedback strategy should be used by featurecontroller (CRITICAL):
+
+        Opp::feature_control_use_fast_reaction_strategy(true);
+
+   - Function ww() defines an Opp::Frame object called f_ww, where
+        the objective of maintaining frame-time within 30% of 0.005 seconds
+        is specified. This is a 'static' instantiation as the frame-object
+        needs to persist for the duration of the application execution.
+
+         static Opp::Frame f_ww(Opp::Objective(0.005, 0.3, 0.3, 0.9, 3));
+         Opp::FrameStatistics stats_f_ww(f_ww.id);
+         Opp::frame_enter(f_ww.id);
+
+    - The Opp::FrameStatistics object is useful for collecting statistics
+        for frame f_ww, but is not needed for feature-control.
+
+    - Opp::frame_enter() demarcates the start of an f_ww frame. At the
+       end of ww(), there is a corresponding Opp::frame_exit_complete().
+
+    - The body of ww() really consists of the following line, which
+        indirectly invokes any one of f1 to f4, as dictated by
+        the learning models in featurecontroller.
+
+         ex.run();
+
+    - Prior to ex.run(), the following lines *bind* functions f1 to f4 to their
+      appropriate arguments (program variable 'x' for all of them, in this example),
+      without invoking these function.
+
+         caller1.rebind(OPP_FUNC_HANDLE(f1, x));
+         caller2.rebind(OPP_FUNC_HANDLE(f2, x));
+         caller3.rebind(OPP_FUNC_HANDLE(f3, x));
+         caller4.rebind(OPP_FUNC_HANDLE(f4, x));
+
+     - caller1 to caller4 are API objects that have been associated
+       with Opp::ExecFrame ex, which are used as proxies for invoking
+       the correct f1 to f4 function already bound to its argument x.
+
+     - The *decreasing* complexity order of f1 to f4 is indicated by
+       the order of the corresponding caller1 to caller4 objects, when
+       they are associated with Opp::Model model as a vector. 'model'
+       is then associated with 'Opp::ExecFrame ex' by passing it as a
+       constructor argument.  The model is referenced by the runtime of
+       the featurecontroller in order to determine that caller1 to
+       caller4 are the available alternatives in sorted order. The option
+       within ex is picked based on what the controller predicts will
+       best meet the stated objective of the closest enclosing
+       Opp::Frame, i.e., f_ww.
+
+     - Note that model and caller1 to caller4 are persistent objects,
+       and hence are allocated using 'static'.
+
+     - Note that there is an Opp::Frame f_main and corresponding
+       calls to Opp::frame_enter and Opp::frame_exit_complete for main().
+       These are not necessary for feature-control, and are only useful for
+       collecting overall statistics.
+       
+   b) Building and running the synthetic application:
+     - Build executable opp_test.exe by typing 'make test' under src/
+
+     - ./opp_test.exe > log
+
+     - Examine 'log' in a text editor. Near bottom of file, look for
+        'unbinned_satisfaction_ratio'. This captures the fraction of frames
+         whose frame-execution-times stayed within the specified window.
+
+     - Currently, the specified mean for the frame-window is 0.005 seconds
+        (defined as objective for Opp::Frame f_ww). Try changing to
+        0.004, 0.003, 0.002, 0.006, 0.008, 0.010, etc., re-compile and re-run each time.
+        Observe the variations in 'unbinned_satisfaction_ratio' in each case as
+        featurecontroller attempts to achieve each of those objectives.
+       
+
+4. Applying Feature Controller to a real application.
+     featurecontroller/samples/README_samples demonstrates how to apply
+     featurecontroller to the mpeg2enc application from the MediaBench II video suite,
+     and how to generate and interpret results.
+
+
+[1] Kumar, T., Cledat, R. E., and Pande, S., "Dynamic tuning of feature set in
+    highly variant interactive applications," in Proceedings of the tenth ACM international
+    conference on Embedded software, EMSOFT '10, (New York, NY, USA), pp. 289-298,
+    ACM, 2010.
+
