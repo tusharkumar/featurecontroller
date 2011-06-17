@@ -47,7 +47,7 @@ QoS improvements for the following applications (see [1] for some results):
      http://euler.slu.edu/~fritts/mediabench/mb2/index.html
        
  - FERNS: computer vision object-tracking application
-     http://cvlab.epfl.ch/alumni/oezuysal/ferns.html
+     http://cvlab.epfl.ch/software/ferns/index.php
 
  - RTFTR: real-time face-tracking and recognition
      http://rtftr.sourceforge.net/
